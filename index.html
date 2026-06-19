@@ -58,6 +58,13 @@
   <div class="status" id="status4">Noch nicht getestet</div>
 </div>
 
+<div class="test">
+  <h2><span class="step">5</span>Sync-Präzision messen</h2>
+  <p>Misst die genaue zeitliche Abweichung zwischen den Spuren beim Start.</p>
+  <button onclick="test5()">▶ Sync messen</button>
+  <div class="status" id="status5">Noch nicht getestet</div>
+</div>
+
 <div class="log" id="log">Bereit für Tests...\n</div>
 
 <script>
@@ -184,6 +191,41 @@ function checkAfterLock() {
   } else {
     setStatus('status4','State: '+actx.state, false);
   }
+}
+
+function test5() {
+  log('--- Test 5: Sync-Präzision ---');
+  const freqs = [440, 554, 659];
+  const startTimes = [];
+  let loadedCount = 0;
+  const audios = freqs.map(f => new Audio(makeBeepDataUrl(f, 2)));
+
+  audios.forEach((a,i) => {
+    a.addEventListener('playing', () => {
+      startTimes[i] = performance.now();
+      log(`Spur ${i+1} 'playing' Event bei: ${startTimes[i].toFixed(1)}ms`);
+      loadedCount++;
+      if(loadedCount === 3) {
+        const maxDiff = Math.max(...startTimes) - Math.min(...startTimes);
+        const msg = `Max. Abweichung zwischen Spuren: ${maxDiff.toFixed(1)}ms`;
+        log(msg);
+        if(maxDiff < 30) {
+          setStatus('status5', '✓ ' + msg + ' (sehr gut, < 30ms)', true);
+        } else if(maxDiff < 100) {
+          setStatus('status5', '⚠ ' + msg + ' (hörbar, aber meist akzeptabel)', false);
+        } else {
+          setStatus('status5', '✗ ' + msg + ' (deutlich hörbar als Versatz)', false);
+        }
+      }
+    });
+  });
+
+  const t0 = performance.now();
+  log('Start-Aufruf bei: '+t0.toFixed(1)+'ms');
+  audios.forEach((a,i) => {
+    a.play().catch(e => log('Spur '+(i+1)+' Fehler: '+e.message));
+  });
+  activeAudios.push(...audios);
 }
 
 document.addEventListener('visibilitychange', () => {
