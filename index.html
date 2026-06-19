@@ -65,6 +65,13 @@
   <div class="status" id="status5">Noch nicht getestet</div>
 </div>
 
+<div class="test">
+  <h2><span class="step">6</span>Web Audio API (verbesserter Unlock)</h2>
+  <p>Web Audio API mit explizitem "Unlock-Trick" — erst Silent-Buffer abspielen, dann erst den eigentlichen Ton.</p>
+  <button onclick="test6()">▶ Test 6 abspielen</button>
+  <div class="status" id="status6">Noch nicht getestet</div>
+</div>
+
 <div class="log" id="log">Bereit für Tests...\n</div>
 
 <script>
@@ -226,6 +233,56 @@ function test5() {
     a.play().catch(e => log('Spur '+(i+1)+' Fehler: '+e.message));
   });
   activeAudios.push(...audios);
+}
+
+function test6() {
+  log('--- Test 6: Web Audio API mit Unlock-Trick ---');
+  try {
+    // Create fresh context each time for this test
+    const ctx6 = new (window.AudioContext||window.webkitAudioContext)();
+    log('Neuer AudioContext erstellt, state: '+ctx6.state);
+
+    // CRITICAL: play a silent buffer FIRST, synchronously, to unlock
+    const silentBuffer = ctx6.createBuffer(1, 1, 22050);
+    const silentSource = ctx6.createBufferSource();
+    silentSource.buffer = silentBuffer;
+    silentSource.connect(ctx6.destination);
+    silentSource.start(0);
+    log('Silent buffer gestartet (unlock attempt)');
+
+    // Now try resume
+    ctx6.resume().then(() => {
+      log('resume() Promise aufgelöst, state: '+ctx6.state);
+
+      if(ctx6.state !== 'running') {
+        setStatus('status6','✗ State nach resume(): '+ctx6.state+' (Unlock fehlgeschlagen)', false);
+        return;
+      }
+
+      // Now play the actual chord
+      const freqs = [440, 554, 659];
+      const now = ctx6.currentTime;
+      freqs.forEach((f,i) => {
+        const osc = ctx6.createOscillator();
+        const gain = ctx6.createGain();
+        osc.frequency.value = f;
+        gain.gain.value = 0.15;
+        osc.connect(gain);
+        gain.connect(ctx6.destination);
+        osc.start(now);
+        osc.stop(now + 2);
+        log(`Oszillator ${i+1} (${f}Hz) bei AudioContext-Zeit ${now.toFixed(3)}s gestartet`);
+      });
+      setStatus('status6','✓ State: running — alle 3 Töne bei exakt gleicher AudioContext-Zeit gestartet', true);
+    }).catch(e => {
+      setStatus('status6','✗ resume() Fehler: '+e.message, false);
+      log('resume() FEHLER: '+e.message);
+    });
+
+  } catch(e) {
+    setStatus('status6','✗ Fehler: '+e.message, false);
+    log('Test 6 FEHLER: '+e.message);
+  }
 }
 
 document.addEventListener('visibilitychange', () => {
