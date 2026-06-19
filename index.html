@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iOS Audio Test</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  body{font-family:-apple-system,sans-serif;background:#0f0f1a;color:#f0eee8;padding:1.5rem;margin:0}
+  h1{font-size:1.3rem;color:#e8c06a;margin-bottom:.3rem}
+  p.sub{color:#a8a6b8;font-size:.85rem;margin-bottom:1.5rem}
+  .test{background:#1a1a2e;border:1px solid #2e2e50;border-radius:12px;padding:1.2rem;margin-bottom:1rem}
+  .test h2{font-size:1rem;color:#e8c06a;margin-bottom:.5rem}
+  .test p{font-size:.8rem;color:#a8a6b8;margin-bottom:.8rem;line-height:1.4}
+  button{background:#c89b3c;color:#1a1a00;border:none;border-radius:8px;padding:.7rem 1.2rem;font-size:.9rem;font-weight:600;cursor:pointer;margin-right:.5rem;margin-bottom:.5rem}
+  button:active{background:#e8c06a}
+  button.stop{background:#2e2e50;color:#f0eee8}
+  .status{font-size:.85rem;padding:.6rem;border-radius:8px;margin-top:.6rem;background:#252540}
+  .status.ok{background:#1a3a1a;color:#7fd87f}
+  .status.err{background:#3a1a1a;color:#e87070}
+  .log{font-family:monospace;font-size:.7rem;background:#000;color:#0f0;padding:.7rem;border-radius:8px;margin-top:1rem;max-height:200px;overflow-y:auto;white-space:pre-wrap}
+  .step{display:inline-block;background:#c89b3c;color:#1a1a00;width:22px;height:22px;border-radius:50%;text-align:center;line-height:22px;font-size:.8rem;font-weight:700;margin-right:.5rem}
+</style>
+</head>
+<body>
+<h1>🎧 iOS Audio Test</h1>
+<p class="sub">Bitte jeden Test einzeln durchgehen, in der angegebenen Reihenfolge. Nach jedem Test kurz Bescheid geben was passiert ist.</p>
+
+<div class="test">
+  <h2><span class="step">1</span>HTML5 Audio (einzeln)</h2>
+  <p>Einfachstes mögliches Audio-Element, eine einzelne Datei, direkter Klick.</p>
+  <button onclick="test1()">▶ Test 1 abspielen</button>
+  <button class="stop" onclick="stopAll()">■ Stopp</button>
+  <div class="status" id="status1">Noch nicht getestet</div>
+</div>
+
+<div class="test">
+  <h2><span class="step">2</span>HTML5 Audio (3 Spuren gleichzeitig)</h2>
+  <p>Drei Audio-Elemente gleichzeitig gestartet — wie im Chor-Mixer.</p>
+  <button onclick="test2()">▶ Test 2 abspielen</button>
+  <button class="stop" onclick="stopAll()">■ Stopp</button>
+  <div class="status" id="status2">Noch nicht getestet</div>
+</div>
+
+<div class="test">
+  <h2><span class="step">3</span>Web Audio API (AudioBufferSourceNode)</h2>
+  <p>Modernere Technik mit perfekter Synchronisation — braucht etwas Ladezeit.</p>
+  <button onclick="test3()">▶ Test 3 abspielen</button>
+  <button class="stop" onclick="stopAll()">■ Stopp</button>
+  <div class="status" id="status3">Noch nicht getestet</div>
+</div>
+
+<div class="test">
+  <h2><span class="step">4</span>Nach Bildschirm sperren</h2>
+  <p>Test 3 starten, dann Bildschirm kurz sperren (Seitentaste), wieder entsperren, hier auf "Prüfen" klicken.</p>
+  <button onclick="test3()">▶ Erst abspielen</button>
+  <button onclick="checkAfterLock()">🔓 Dann hier: Prüfen nach Entsperren</button>
+  <div class="status" id="status4">Noch nicht getestet</div>
+</div>
+
+<div class="log" id="log">Bereit für Tests...\n</div>
+
+<script>
+function log(msg) {
+  const l = document.getElementById('log');
+  l.textContent += msg + '\n';
+  l.scrollTop = l.scrollHeight;
+}
+function setStatus(id, msg, ok) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'status ' + (ok ? 'ok' : 'err');
+}
+
+// Test audio file - short tone generated as data URL (no external file needed)
+function makeBeepDataUrl(freq, duration) {
+  const sampleRate = 22050;
+  const samples = sampleRate * duration;
+  const buffer = new ArrayBuffer(44 + samples * 2);
+  const view = new DataView(buffer);
+  function writeString(offset, str) { for (let i=0;i<str.length;i++) view.setUint8(offset+i, str.charCodeAt(i)); }
+  writeString(0,'RIFF'); view.setUint32(4,36+samples*2,true); writeString(8,'WAVE');
+  writeString(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
+  view.setUint16(22,1,true); view.setUint32(24,sampleRate,true); view.setUint32(28,sampleRate*2,true);
+  view.setUint16(32,2,true); view.setUint16(34,16,true);
+  writeString(36,'data'); view.setUint32(40,samples*2,true);
+  for (let i=0;i<samples;i++){
+    const t = i/sampleRate;
+    const env = Math.min(1, (duration-t)*4) * Math.min(1,t*20);
+    const sample = Math.sin(2*Math.PI*freq*t) * 0.3 * env;
+    view.setInt16(44+i*2, sample*32767, true);
+  }
+  const blob = new Blob([buffer], {type:'audio/wav'});
+  return URL.createObjectURL(blob);
+}
+
+let activeAudios = [];
+let actx = null;
+let activeSources = [];
+
+function stopAll() {
+  activeAudios.forEach(a => { try{a.pause();}catch(e){} });
+  activeAudios = [];
+  activeSources.forEach(s => { try{s.stop();}catch(e){} });
+  activeSources = [];
+  log('Gestoppt.');
+}
+
+function test1() {
+  log('--- Test 1: Einzelnes HTML5 Audio ---');
+  const a = new Audio(makeBeepDataUrl(440, 2));
+  a.play().then(()=>{
+    setStatus('status1','✓ Ton sollte jetzt 2 Sekunden lang spielen (440Hz)', true);
+    log('Test 1: play() erfolgreich aufgerufen');
+  }).catch(e=>{
+    setStatus('status1','✗ Fehler: '+e.message, false);
+    log('Test 1 FEHLER: '+e.message);
+  });
+  activeAudios.push(a);
+}
+
+function test2() {
+  log('--- Test 2: Drei HTML5 Audio gleichzeitig ---');
+  const freqs = [440, 554, 659]; // A, C#, E - ein Akkord
+  let successCount = 0;
+  freqs.forEach((f,i) => {
+    const a = new Audio(makeBeepDataUrl(f, 3));
+    a.play().then(()=>{
+      successCount++;
+      log(`Test 2: Spur ${i+1} (${f}Hz) gestartet`);
+      if(successCount===3){
+        setStatus('status2','✓ Alle 3 Töne sollten als Akkord hörbar sein', true);
+      }
+    }).catch(e=>{
+      setStatus('status2','✗ Spur '+(i+1)+' Fehler: '+e.message, false);
+      log('Test 2 Spur '+(i+1)+' FEHLER: '+e.message);
+    });
+    activeAudios.push(a);
+  });
+}
+
+function test3() {
+  log('--- Test 3: Web Audio API ---');
+  try {
+    if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state==='suspended') actx.resume();
+    log('AudioContext state: '+actx.state);
+
+    const freqs = [440, 554, 659];
+    freqs.forEach((f,i) => {
+      const osc = actx.createOscillator();
+      const gain = actx.createGain();
+      osc.frequency.value = f;
+      gain.gain.value = 0.15;
+      osc.connect(gain);
+      gain.connect(actx.destination);
+      osc.start();
+      osc.stop(actx.currentTime + 3);
+      activeSources.push(osc);
+      log(`Test 3: Oszillator ${i+1} (${f}Hz) gestartet`);
+    });
+    setStatus('status3','✓ AudioContext state: '+actx.state+' — Akkord sollte spielen', true);
+  } catch(e) {
+    setStatus('status3','✗ Fehler: '+e.message, false);
+    log('Test 3 FEHLER: '+e.message);
+  }
+}
+
+function checkAfterLock() {
+  if(!actx) {
+    setStatus('status4','Bitte zuerst "Erst abspielen" klicken', false);
+    return;
+  }
+  log('--- Prüfung nach Entsperren ---');
+  log('AudioContext state: '+actx.state);
+  if(actx.state === 'interrupted') {
+    setStatus('status4','⚠ State ist "interrupted" — versuche resume()...', false);
+    actx.resume().then(()=>{
+      log('Nach resume(): '+actx.state);
+      setStatus('status4','Nach resume(): '+actx.state, actx.state==='running');
+    });
+  } else if(actx.state === 'running') {
+    setStatus('status4','✓ State ist "running" — kein Problem aufgetreten', true);
+  } else {
+    setStatus('status4','State: '+actx.state, false);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  log('visibilitychange: document.visibilityState = '+document.visibilityState);
+  if(actx) log('  AudioContext state bei visibilitychange: '+actx.state);
+});
+
+log('Seite geladen. iOS Version: ' + navigator.userAgent);
+</script>
+</body>
+</html>
